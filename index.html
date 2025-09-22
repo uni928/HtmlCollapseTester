@@ -51,6 +51,11 @@
         <label for="jsFiles">JavaScript</label>
         <input id="jsFiles" type="file" accept=".js,application/javascript" multiple>
       </div>
+
+      <div class="row">
+        <label for="imgFiles">画像（任意個）</label>
+        <input id="imgFiles" type="file" accept="image/*,.svg" multiple>
+      </div>
       <div class="row">
         <label class="row" style="width:auto;gap:6px;">
           <input id="pauseAnim" type="checkbox" checked> iframe内のアニメ・遷移停止
@@ -99,6 +104,7 @@
   const htmlFile = document.getElementById('htmlFile');
   const cssFiles = document.getElementById('cssFiles');
   const jsFiles  = document.getElementById('jsFiles');
+  const imgFiles = document.getElementById('imgFiles');
   const pauseAnim= document.getElementById('pauseAnim');
   const showBtn  = document.getElementById('showBtn');
   const loadMsg  = document.getElementById('loadMsg');
@@ -321,29 +327,93 @@ mark.style.height = Math.max(0, r.height + 8) + "px";
     }
   };
 
-  // --- 注入 ---
-  const injectIntoIframe = async (htmlText, cssTexts, jsTexts, {stopAnim})=>{
+  // --- HTML/CSS/JS 注入（画像アセット張り替え対応） ---
+  const injectIntoIframe = async (htmlText, cssTexts, jsTexts, assetMap, {stopAnim})=>{
+    // 1) HTMLを書き込み
     iframe.srcdoc = "<!doctype html><html><head><meta charset='utf-8'></head><body>Loading…</body></html>";
     await waitFrames(1);
     const doc = iframe.contentDocument;
     doc.open(); doc.write(htmlText || "<!doctype html><p>empty</p>"); doc.close();
     await waitFrames(2);
 
+    // 2) CSS（テキストに対して url(...) を事前置換してから注入）
     const head = doc.head || doc.getElementsByTagName('head')[0] || doc.documentElement;
     for (const css of cssTexts) {
       const style = doc.createElement('style');
-      style.textContent = css; head.appendChild(style);
+      style.textContent = rewriteCssTextWithAssets(css, assetMap.findAssetURL);
+      head.appendChild(style);
     }
     if (stopAnim) {
       const killer = doc.createElement('style');
       killer.textContent="*,*::before,*::after{animation:none!important;transition:none!important}";
       head.appendChild(killer);
     }
+
+    // 3) 画像アセット張り替え（DOM属性・style属性・<style>内）
+    wireLocalAssetsInDOM(doc, assetMap.findAssetURL);
+
+    // 4) JSを注入
     const body = doc.body || doc.documentElement;
     for (const js of jsTexts) {
       const s = doc.createElement('script'); s.type='text/javascript'; s.textContent = js; body.appendChild(s);
     }
+
     await waitFrames(3);
+  };
+
+  // HTML挿入後にDOM属性の参照を張り替え（img/src, srcset, poster, link[icon], source, video/audioなど）
+  const wireLocalAssetsInDOM = (doc, findAssetURL) => {
+    // 単一URL属性
+    const singleAttrs = [
+      ["img","src"], ["video","poster"], ["video","src"], ["audio","src"],
+      ["source","src"], ["link[rel~='icon']","href"], ["link[rel~='apple-touch-icon']","href"]
+    ];
+    for (const [sel, attr] of singleAttrs) {
+      doc.querySelectorAll(sel).forEach(el => {
+        const v = el.getAttribute(attr);
+        const blob = findAssetURL(v);
+        if (blob) el.setAttribute(attr, blob);
+      });
+    }
+    // srcset（複数URL）
+    const srcsetSel = ["img[srcset]", "source[srcset]"];
+    doc.querySelectorAll(srcsetSel.join(",")).forEach(el => {
+      const srcset = el.getAttribute("srcset");
+      if (!srcset) return;
+      const parts = srcset.split(",").map(s=>s.trim()).filter(Boolean);
+      const rewritten = parts.map(part=>{
+        // "path xDescriptor" or just "path"
+        const sp = part.split(/\s+/);
+        const url = sp[0];
+        const rest = sp.slice(1).join(" ");
+        const blob = findAssetURL(url);
+        return (blob || url) + (rest ? " " + rest : "");
+      }).join(", ");
+      el.setAttribute("srcset", rewritten);
+    });
+
+    // style属性の url(...)
+    doc.querySelectorAll("[style]").forEach(el => {
+      const st = el.getAttribute("style");
+      const rw = rewriteCssTextWithAssets(st, findAssetURL);
+      if (rw !== st) el.setAttribute("style", rw);
+    });
+
+    // <style> 内の url(...)
+    doc.querySelectorAll("style").forEach(styleEl => {
+      const t = styleEl.textContent;
+      const rw = rewriteCssTextWithAssets(t, findAssetURL);
+      if (rw !== t) styleEl.textContent = rw;
+    });
+  };
+
+  // CSSテキスト中の url(...) / @import url(...) を張り替え
+  const rewriteCssTextWithAssets = (cssText, findAssetURL) => {
+    if (!cssText) return cssText;
+    return cssText.replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g, (m, q, url) => {
+      const blob = findAssetURL(url);
+      return blob ? `url("${blob}")` : m;
+    });
   };
 
   const toggleControls = (on)=>{
@@ -359,7 +429,10 @@ mark.style.height = Math.max(0, r.height + 8) + "px";
       const htmlText = await readAsText(htmlFile.files[0]);
       const cssTexts=[]; for (const f of cssFiles.files) cssTexts.push(await readAsText(f));
       const jsTexts=[];  for (const f of jsFiles.files)  jsTexts.push(await readAsText(f));
-      await injectIntoIframe(htmlText, cssTexts, jsTexts, { stopAnim: pauseAnim.checked });
+
+// 画像アセットのマップ作成
+      const assetMap = buildAssetMap(imgFiles.files);
+      await injectIntoIframe(htmlText, cssTexts, jsTexts, assetMap, { stopAnim: pauseAnim.checked });
       isLoaded = true;
       await setViewportWidth(currentWidth, {silent:true});
 
@@ -463,6 +536,35 @@ mark.style.height = Math.max(0, r.height + 8) + "px";
         baseMeta = captureBaseMeta(+maxElsInput.value||400, +quantInput.value||1);
       }
     } finally { toggleControls(true); }
+  };
+
+// --- 画像アセットのBlob URL化＆マッピング ---
+  const buildAssetMap = (fileList) => {
+    const byName = new Map();     // "logo.png" -> blobURL
+    const byLower = new Map();    // lower-case name
+    for (const f of fileList) {
+      const url = URL.createObjectURL(f);
+      byName.set(f.name, url);
+      byLower.set(f.name.toLowerCase(), url);
+    }
+    // 簡易・末尾一致検索ヘルパ
+    const findAssetURL = (refUrl) => {
+      if (!refUrl) return null;
+      try {
+        const u = new URL(refUrl, "http://local/");
+        const path = decodeURIComponent(u.pathname || "");
+        const file = path.split("/").filter(Boolean).pop() || "";
+        if (!file) return null;
+        return byName.get(file) || byLower.get(file.toLowerCase()) || null;
+      } catch {
+        // 相対参照等もあるので、最後のパスセグメントだけで推測
+        const clean = String(refUrl).split("?")[0].split("#")[0];
+        const file = clean.split("/").filter(Boolean).pop() || "";
+        if (!file) return null;
+        return byName.get(file) || byLower.get(file.toLowerCase()) || null;
+      }
+    };
+    return { byName, byLower, findAssetURL };
   };
 
   // --- 左：前の境界へダイレクト。変化後のみ強調 ---
