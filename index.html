@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>幅ジャンプ・テスター</title>
+<style>
+  :root { --bar-h: 56px; --initw: 375px; --minw:320px; --maxw:2560px; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif; background:#f6f7f9; color:#222; }
+  header { position: sticky; top:0; z-index:5; background:#fff; border-bottom:1px solid #e6e8eb; }
+  header .inner { max-width: 1100px; margin: 0 auto; padding: 12px 16px; display: grid; gap: 8px; }
+  h1 { font-size: 16px; margin: 0; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .row label { font-weight:600; width:72px; }
+  .row input[type="file"] { flex:1 1 420px; }
+  button { appearance:none; border:1px solid #d0d7de; background:#fff; padding:8px 12px; border-radius:8px; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.55; cursor:not-allowed; }
+  main { padding: 16px; padding-bottom: calc(var(--bar-h) + 16px); }
+  .stage { max-width: calc(var(--maxw) + 20px); margin: 0 auto; }
+  .viewport-wrap { background:#fff; border:1px solid #e1e4e8; border-radius:12px; padding:16px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+  .viewport { width: var(--initw); margin: 0 auto; border:2px solid #dbe0e6; border-radius:8px; background:#f8fafc; }
+  .viewport iframe { display:block; width:100%; height:400px; border:0; border-radius:6px; background:#fff; }
+  /* 最下部の帯 */
+  .bar { position:fixed; inset-inline:0; bottom:0; z-index:10; height:var(--bar-h); display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:10px; padding:8px 12px; background:rgba(255,255,255,.92); backdrop-filter:saturate(1.2) blur(6px); border-top:1px solid #e4e8ee; }
+  .pill { padding:6px 10px; border-radius:999px; background:#f1f3f6; border:1px solid #e1e4e8; }
+  .num { font: 600 16px/1 tabular-nums, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .status { min-width: 10ch; font-size:13px; color:#666; }
+  .ghost { opacity:.7; }
+  .kbd { font:600 12px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; padding:2px 6px; border:1px solid #d0d7de; border-radius:6px; background:#f7f9fb; }
+  .gear { justify-self:end; }
+  .gear-panel { position:fixed; right:10px; bottom:calc(var(--bar-h) + 10px); background:#fff; border:1px solid #dfe3ea; border-radius:10px; padding:10px; box-shadow:0 6px 24px rgba(0,0,0,.08); display:none; min-width:260px; }
+  .gear-panel.open { display:block; }
+  .gear-panel label { font-size:12px; color:#555; display:block; }
+  .gear-panel input[type="number"] { width:100%; padding:6px 8px; margin:4px 0 10px; border:1px solid #d0d7de; border-radius:6px; background:#fafbfc; }
+</style>
+</head>
+<body>
+  <header>
+    <div class="inner">
+      <h1>幅ジャンプ・テスター</h1>
+      <div class="row">
+        <label for="htmlFile">HTML</label>
+        <input id="htmlFile" type="file" accept=".html,.htm,text/html">
+      </div>
+      <div class="row">
+        <label for="cssFiles">CSS</label>
+        <input id="cssFiles" type="file" accept=".css,text/css" multiple>
+      </div>
+      <div class="row">
+        <label for="jsFiles">JavaScript</label>
+        <input id="jsFiles" type="file" accept=".js,application/javascript" multiple>
+      </div>
+      <div class="row">
+        <label class="row" style="width:auto;gap:6px;">
+          <input id="pauseAnim" type="checkbox" checked> iframe内のアニメ・遷移停止
+        </label>
+        <button id="showBtn">表示</button>
+        <span id="loadMsg" class="ghost"></span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="stage">
+      <div class="viewport-wrap">
+        <div id="viewport" class="viewport" style="width:var(--initw)">
+          <iframe id="sandbox" sandbox="allow-scripts allow-same-origin"></iframe>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <div class="bar" role="group" aria-label="幅コントロール">
+    <div class="row">
+      <button id="prevBtn" title="前の変化へ（左）">←</button>
+      <div class="pill"><span class="num" id="widthNum">—</span><span class="ghost"> px</span></div>
+      <button id="nextBtn" title="次の変化へ（右）">→</button>
+      <span id="status" class="status"></span>
+    </div>
+    <div class="row ghost">
+      <span>ヒント：</span><span class="kbd">←</span>/<span class="kbd">→</span> で操作（境界幅にダイレクトジャンプ）
+    </div>
+    <div class="row gear">
+      <button id="gearBtn" title="探索範囲などを調整">⚙</button>
+      <div id="gearPanel" class="gear-panel">
+        <label for="minW">最小幅(px)</label><input id="minW" type="number" min="0" value="320">
+        <label for="maxW">最大幅(px)</label><input id="maxW" type="number" min="100" value="2560">
+        <label for="coarse">粗探索ステップ(px)</label><input id="coarse" type="number" min="1" value="32">
+        <label for="maxEls">計測する要素数上限</label><input id="maxEls" type="number" min="50" value="400">
+        <label for="quant">高さ丸め(px, 0で丸めなし)</label><input id="quant" type="number" min="0" value="1">
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  // --- DOM 参照 ---
+  const htmlFile = document.getElementById('htmlFile');
+  const cssFiles = document.getElementById('cssFiles');
+  const jsFiles  = document.getElementById('jsFiles');
+  const pauseAnim= document.getElementById('pauseAnim');
+  const showBtn  = document.getElementById('showBtn');
+  const loadMsg  = document.getElementById('loadMsg');
+  const viewport = document.getElementById('viewport');
+  const iframe   = document.getElementById('sandbox');
+
+  const prevBtn  = document.getElementById('prevBtn');
+  const nextBtn  = document.getElementById('nextBtn');
+  const widthNum = document.getElementById('widthNum');
+  const statusEl = document.getElementById('status');
+  const gearBtn  = document.getElementById('gearBtn');
+  const gearPanel= document.getElementById('gearPanel');
+  const minWInput= document.getElementById('minW');
+  const maxWInput= document.getElementById('maxW');
+  const coarseInput=document.getElementById('coarse');
+  const maxElsInput=document.getElementById('maxEls');
+  const quantInput=document.getElementById('quant');
+
+  let isLoaded = false;
+  let currentWidth = parseInt(getComputedStyle(viewport).width) || 375;
+  widthNum.textContent = currentWidth;
+
+  // 「直前の安定状態」のメタ：基準幅での高さ/縦位置（上方シフト計算に使用）
+  let baseMeta = { width: currentWidth, map: null, list: [] };
+
+  // --- ヘルパ ---
+  const waitFrames = (n=2) => new Promise(res => {
+    let i=0; const step=()=> (++i>=n)?res():requestAnimationFrame(step); requestAnimationFrame(step);
+  });
+  const clamp=(n,lo,hi)=>Math.max(lo,Math.min(hi,n));
+
+  const readAsText = (file) => new Promise((resolve,reject)=>{
+    const fr=new FileReader();
+    fr.onerror=()=>reject(fr.error);
+    fr.onload =()=>resolve(String(fr.result||""));
+    fr.readAsText(file);
+  });
+
+  const setViewportWidth = async (px,{silent=false}={})=>{
+    const minW=+minWInput.value||320, maxW=+maxWInput.value||2560;
+    currentWidth = clamp(px|0, minW, maxW);
+    viewport.style.width = currentWidth + "px";
+    if (!silent) widthNum.textContent = String(currentWidth);
+    await waitFrames(2);
+    try {
+      const doc = iframe.contentDocument;
+      const h = Math.max(
+        doc.body.scrollHeight, doc.documentElement.scrollHeight,
+        doc.body.offsetHeight, doc.documentElement.offsetHeight
+      );
+      iframe.style.height = Math.max(200,h) + "px";
+    } catch {}
+    await waitFrames(1);
+  };
+
+  // --- 要素ID（DOM順ベース。親>子インデックス） ---
+  const uidFor = (el) => {
+    const parts=[];
+    let cur = el;
+    while (cur && cur.nodeType===1 && cur !== cur.ownerDocument.documentElement) {
+      const parent = cur.parentElement;
+      if (!parent) break;
+      const idx = Array.prototype.indexOf.call(parent.children, cur);
+      parts.push(cur.tagName + "#" + idx);
+      cur = parent;
+      if (parts.length>512) break;
+    }
+    return parts.reverse().join(">");
+  };
+
+  // ハイライト用スタイル
+  const ensureHighlightStyle = ()=>{
+    const doc = iframe.contentDocument;
+    if (doc.getElementById("__height_change_style__")) return;
+    const style = doc.createElement('style');
+    style.id="__height_change_style__";
+    style.textContent = `
+      .__height_changed__ { outline: 2px dashed #d9480f !important; outline-offset: 2px !important; background: rgba(255,136,0,.08) !important; }
+      .__height_marker__ { position:absolute; z-index:2147483647; pointer-events:none; border:2px solid #d9480f; border-radius:6px; box-shadow:0 4px 16px rgba(0,0,0,.2); }
+      .__height_marker__ .lbl { background:#d9480f; color:#fff; font: 700 12px/1 ui-monospace,monospace; padding:4px 6px; border-bottom-left-radius:6px; border-bottom-right-radius:6px; }
+    `;
+    (doc.head||doc.documentElement).appendChild(style);
+  };
+  const clearHighlights = ()=>{
+    const doc = iframe.contentDocument;
+    if (!doc) return;
+    doc.querySelectorAll('.__height_changed__').forEach(el=>el.classList.remove('__height_changed__'));
+    doc.querySelectorAll('.__height_marker__').forEach(el=>el.remove());
+  };
+
+  // --- メタ収集（基準幅での「高さ」と「top」「bottom」） ---
+  const captureBaseMeta = (limit=400, quant=1)=>{
+    const doc = iframe.contentDocument;
+    if (!doc) return { map:new Map(), list:[] };
+    const all = doc.body ? doc.body.querySelectorAll('*') : doc.querySelectorAll('*');
+    const map = new Map();            // uid -> baseHeight
+    const list = [];                  // [{uid, top, bottom, height, el}]
+    let cnt=0;
+    for (let i=0;i<all.length && cnt<limit;i++){
+      const el = all[i];
+      const rect = el.getBoundingClientRect();
+      let h = Math.max(0, Math.round(rect.height));
+      if (quant && quant>1) h = Math.round(h/quant)*quant;
+      if (h===0) continue;
+      const uid = uidFor(el);
+      if (!uid) continue;
+      const top = Math.round(rect.top);
+      const bottom = top + h;
+      map.set(uid, h);
+      list.push({ uid, top, bottom, height: h, el });
+      cnt++;
+    }
+    // 上からの順序で並べる（安定化のため top, then DOM順）
+    list.sort((a,b)=> a.top===b.top ? 0 : a.top - b.top);
+    return { map, list };
+  };
+
+  // --- 現在幅の高さ・top計測（比較用） ---
+  const captureNowOrder = (limit=400, quant=1)=>{
+    const doc = iframe.contentDocument;
+    if (!doc) return [];
+    const all = doc.body ? doc.body.querySelectorAll('*') : doc.querySelectorAll('*');
+    const order = [];
+    let cnt=0;
+    for (let i=0;i<all.length && cnt<limit;i++){
+      const el = all[i];
+      const rect = el.getBoundingClientRect();
+      let h = Math.max(0, Math.round(rect.height));
+      if (quant && quant>1) h = Math.round(h/quant)*quant;
+      if (h===0) continue;
+      const uid = uidFor(el);
+      if (!uid) continue;
+      const top = Math.round(rect.top);
+      const bottom = top + h;
+      order.push({ uid, el, top, bottom, height: h });
+      cnt++;
+    }
+    // 上から順
+    order.sort((a,b)=> a.top===b.top ? 0 : a.top - b.top);
+    return order;
+  };
+
+  // --- 上方シフト考慮のための累積ΔHを計算 ---
+  // 基準リスト(base.list)と現在(order)の高さを突き合わせ、
+  // 「自分より上（基準topが小さい＆重なっていない）の要素」の ΔH の合計を、自分の期待topの補正に用いる。
+  const buildDeltaHMap = (base, order) => {
+    // uid -> deltaH
+    const deltaH = new Map();
+    const baseMapH = base.map;
+    for (const now of order) {
+      const h0 = baseMapH.get(now.uid);
+      if (h0 == null) continue;
+      deltaH.set(now.uid, now.height - h0);
+    }
+    return deltaH;
+  };
+
+  const cumulativeShiftAbove = (uid, base, deltaHMap) => {
+    const me = base.list.find(x=>x.uid===uid);
+    if (!me) return 0;
+    let shift = 0;
+    for (const b of base.list) {
+      if (b.uid === uid) break;
+      // 「自分より上」＝ 基準bottom <= 自分の基準top（重なっていない上側）
+      if (b.bottom <= me.top) {
+        const d = deltaHMap.get(b.uid) || 0;
+        shift += d;
+      }
+    }
+    return shift;
+  };
+
+  // --- 差分（高さのみ判定。ただし上方シフトを考慮して位置ズレは無視） ---
+  // 高さが変わった要素のみを返す。位置ズレだけの要素は返さない。
+  const diffHeights = (base, order, quant=1)=>{
+    const diffs = [];
+    const deltaHMap = buildDeltaHMap(base, order);
+
+    for (const now of order) {
+      const baseH = base.map.get(now.uid);
+      if (baseH == null) continue;
+
+      const THRESHOLD_PX = 10;  // 必要なら数値を変える
+
+// ...
+const dh = now.height - baseH;
+if (Math.abs(dh) >= THRESHOLD_PX) {   // ← これだけ
+  diffs.push({ uid: now.uid, el: now.el, prev: baseH, curr: now.height, dh });
+}
+    }
+    return diffs;
+  };
+
+  // --- 強調表示（変化後のみ。変化前は表示しない） ---
+  const ensureAndClear = ()=>{ ensureHighlightStyle(); clearHighlights(); };
+  const highlightDiffs = (diffs)=>{
+    const doc = iframe.contentDocument;
+    ensureAndClear();
+    for (const d of diffs) {
+      try {
+        d.el.classList.add('__height_changed__');
+        const r = d.el.getBoundingClientRect();
+const win = iframe.contentWindow;                 // ← 追加
+const sx = (win && (win.scrollX || win.pageXOffset)) || 0;
+const sy = (win && (win.scrollY || win.pageYOffset)) || 0;
+
+const mark = doc.createElement('div');
+mark.className='__height_marker__';
+mark.style.left = Math.max(0, r.left - 4 + sx) + "px";  // ← 外側windowではなくiframe側のスクロール
+mark.style.top  = Math.max(0, r.top  - 4 + sy) + "px";  // ← 同上
+mark.style.width  = Math.max(0, r.width + 8) + "px";
+mark.style.height = Math.max(0, r.height + 8) + "px";
+
+        const lbl = doc.createElement('div');
+        lbl.className='lbl';
+        lbl.textContent = `${d.prev}px → ${d.curr}px`;
+        mark.appendChild(lbl);
+        doc.body.appendChild(mark);
+      } catch {}
+    }
+  };
+
+  // --- 注入 ---
+  const injectIntoIframe = async (htmlText, cssTexts, jsTexts, {stopAnim})=>{
+    iframe.srcdoc = "<!doctype html><html><head><meta charset='utf-8'></head><body>Loading…</body></html>";
+    await waitFrames(1);
+    const doc = iframe.contentDocument;
+    doc.open(); doc.write(htmlText || "<!doctype html><p>empty</p>"); doc.close();
+    await waitFrames(2);
+
+    const head = doc.head || doc.getElementsByTagName('head')[0] || doc.documentElement;
+    for (const css of cssTexts) {
+      const style = doc.createElement('style');
+      style.textContent = css; head.appendChild(style);
+    }
+    if (stopAnim) {
+      const killer = doc.createElement('style');
+      killer.textContent="*,*::before,*::after{animation:none!important;transition:none!important}";
+      head.appendChild(killer);
+    }
+    const body = doc.body || doc.documentElement;
+    for (const js of jsTexts) {
+      const s = doc.createElement('script'); s.type='text/javascript'; s.textContent = js; body.appendChild(s);
+    }
+    await waitFrames(3);
+  };
+
+  const toggleControls = (on)=>{
+    prevBtn.disabled = nextBtn.disabled = !on;
+    showBtn.disabled = !on;
+  };
+
+  // --- UI: 表示ボタン ---
+  showBtn.addEventListener('click', async ()=>{
+    if (!htmlFile.files[0]) { alert("HTMLファイルを1つ選択してください。"); return; }
+    toggleControls(false); loadMsg.textContent="読み込み中…"; statusEl.textContent="";
+    try {
+      const htmlText = await readAsText(htmlFile.files[0]);
+      const cssTexts=[]; for (const f of cssFiles.files) cssTexts.push(await readAsText(f));
+      const jsTexts=[];  for (const f of jsFiles.files)  jsTexts.push(await readAsText(f));
+      await injectIntoIframe(htmlText, cssTexts, jsTexts, { stopAnim: pauseAnim.checked });
+      isLoaded = true;
+      await setViewportWidth(currentWidth, {silent:true});
+
+      // 基準メタ（現在幅）
+      baseMeta = captureBaseMeta(+maxElsInput.value||400, +quantInput.value||1);
+      clearHighlights(); // 変化前は強調しない
+      loadMsg.textContent="読み込み完了";
+    } catch(e) {
+      console.error(e); alert("読み込み・注入でエラーが発生しました。コンソールをご確認ください。");
+      loadMsg.textContent="エラー";
+    } finally {
+      toggleControls(true); setTimeout(()=>loadMsg.textContent="", 1500);
+    }
+  });
+
+  // --- 次の境界幅を探索（右） ---
+  const findNextBoundary = async ()=>{
+    const coarse = Math.max(1, +coarseInput.value||32);
+    const maxEls = Math.max(50, +maxElsInput.value||400);
+    const quant  = Math.max(0, +quantInput.value||1);
+    const maxW   = +maxWInput.value||2560;
+
+    await setViewportWidth(currentWidth, {silent:true});
+    const base = baseMeta; // 現在幅を基準にする
+
+    // 粗探索：高さ変化が初めて現れる幅
+    let hit = null;
+    for (let w = currentWidth + 1; w <= maxW; w += coarse) {
+      await setViewportWidth(Math.min(w, maxW), {silent:true});
+      const nowOrder = captureNowOrder(maxEls, quant);
+      const diffs = diffHeights(base, nowOrder, quant);
+      if (diffs.length > 0) { hit = Math.min(w, maxW); break; }
+    }
+    if (hit == null) return null;
+
+    // 二分探索で最小の変化幅を詰める
+    let lo = Math.max(currentWidth + 1, hit - coarse);
+    let hi = hit;
+    // lo が既に変化している場合は補正
+    await setViewportWidth(lo, {silent:true});
+    if (diffHeights(base, captureNowOrder(maxEls, quant), quant).length > 0) {
+      lo = currentWidth + 1;
+    }
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      await setViewportWidth(mid, {silent:true});
+      const diffs = diffHeights(base, captureNowOrder(maxEls, quant), quant);
+      if (diffs.length === 0) lo = mid + 1; else hi = mid;
+    }
+    return lo; // ここが境界幅
+  };
+
+  // --- 前の境界幅を探索（左） ---
+  const findPrevBoundary = async ()=>{
+    const coarse = Math.max(1, +coarseInput.value||32);
+    const maxEls = Math.max(50, +maxElsInput.value||400);
+    const quant  = Math.max(0, +quantInput.value||1);
+    const minW   = +minWInput.value||320;
+
+    await setViewportWidth(currentWidth, {silent:true});
+    const base = baseMeta;
+
+    let firstDiff = null;
+    for (let w = currentWidth - 1; w >= minW; w -= coarse) {
+      await setViewportWidth(w, {silent:true});
+      const diffs = diffHeights(base, captureNowOrder(maxEls, quant), quant);
+      if (diffs.length > 0) { firstDiff = w; break; }
+    }
+    if (firstDiff == null) return null;
+
+    // base≠の最大w を探す → +1 が境界
+    let lo = Math.max(minW, firstDiff);
+    let hi = currentWidth - 1;
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi + 1) / 2);
+      await setViewportWidth(mid, {silent:true});
+      const diffs = diffHeights(base, captureNowOrder(maxEls, quant), quant);
+      if (diffs.length > 0) lo = mid; else hi = mid - 1;
+    }
+    return lo + 1; // 境界幅
+  };
+
+  // --- 右：境界へダイレクト。変化後のみ強調 ---
+  const goNext = async ()=>{
+    if (!isLoaded) { alert("先に「表示」でサイトを読み込んでください。"); return; }
+    toggleControls(false); statusEl.textContent="探索中…";
+    try {
+      const boundary = await findNextBoundary();
+      const maxW = +maxWInput.value||2560;
+      if (boundary == null) {
+        await setViewportWidth(maxW);
+        clearHighlights();
+        statusEl.textContent="最大幅に到達";
+      } else {
+        await setViewportWidth(boundary);
+        const nowOrder = captureNowOrder(+maxElsInput.value||400, +quantInput.value||1);
+        const diffs = diffHeights(baseMeta, nowOrder, +quantInput.value||1);
+        highlightDiffs(diffs);
+        statusEl.textContent = diffs.length ? `変化 ${diffs.length} 要素 @ ${boundary}px` : `変化なし @ ${boundary}px`;
+        // 次回の基準を更新（現在幅を基準にする運用の方が自然）
+        baseMeta = captureBaseMeta(+maxElsInput.value||400, +quantInput.value||1);
+      }
+    } finally { toggleControls(true); }
+  };
+
+  // --- 左：前の境界へダイレクト。変化後のみ強調 ---
+  const goPrev = async ()=>{
+    if (!isLoaded) { alert("先に「表示」でサイトを読み込んでください。"); return; }
+    toggleControls(false); statusEl.textContent="探索中…";
+    try {
+      const boundary = await findPrevBoundary();
+      const minW = +minWInput.value||320;
+      if (boundary == null) {
+        await setViewportWidth(minW);
+        clearHighlights();
+        statusEl.textContent="最小幅に到達";
+      } else {
+        await setViewportWidth(boundary);
+        const nowOrder = captureNowOrder(+maxElsInput.value||400, +quantInput.value||1);
+        const diffs = diffHeights(baseMeta, nowOrder, +quantInput.value||1);
+        highlightDiffs(diffs);
+        statusEl.textContent = diffs.length ? `変化 ${diffs.length} 要素 @ ${boundary}px` : `変化なし @ ${boundary}px`;
+        baseMeta = captureBaseMeta(+maxElsInput.value||400, +quantInput.value||1);
+      }
+    } finally { toggleControls(true); }
+  };
+
+  nextBtn.addEventListener('click', goNext);
+  prevBtn.addEventListener('click', goPrev);
+
+  // キーボードショートカット
+  window.addEventListener('keydown', (e)=>{
+    if (e.key==='ArrowRight') { e.preventDefault(); goNext(); }
+    if (e.key==='ArrowLeft')  { e.preventDefault(); goPrev(); }
+  });
+
+  // 歯車
+  gearBtn.addEventListener('click', ()=> gearPanel.classList.toggle('open'));
+  document.addEventListener('click', (e)=>{
+    if (!gearPanel.contains(e.target) && e.target!==gearBtn) gearPanel.classList.remove('open');
+  });
+
+  // 初期
+  (async ()=>{ await setViewportWidth(currentWidth,{silent:true}); })();
+})();
+</script>
+</body>
+</html>
