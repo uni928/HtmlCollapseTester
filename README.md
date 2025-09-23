@@ -1,4 +1,4 @@
-[# html 表示崩れチェッカー縦幅](https://uni928.github.io/HtmlCollapseTester/)
+[# html 表示崩れチェッカー縦幅(推奨)](https://uni928.github.io/HtmlCollapseTester/)
 
 [# 表示崩れチェッカーy座標](https://uni928.github.io/HtmlCollapseTester/index2.html)
 
