@@ -94,7 +94,13 @@
         <label for="coarse">粗探索ステップ(px)</label><input id="coarse" type="number" min="1" value="32">
         <label for="maxEls">計測する要素数上限</label><input id="maxEls" type="number" min="50" value="400">
         <label for="quant">高さ丸め(px, 0で丸めなし)</label><input id="quant" type="number" min="0" value="1">
-      </div>
+        <label class="row" style="gap:6px;margin-top:6px;">
+          <input id="stripHeaderChk" type="checkbox">
+          読み込み時にヘッダーを削除
+        </label>
+        <label for="stripSel">削除セレクタ（カンマ区切り）</label>
+        <input id="stripSel" type="text" value="header, [role='banner'], .site-header, #site-header">
+       </div>
     </div>
   </div>
 
@@ -122,6 +128,8 @@
   const coarseInput=document.getElementById('coarse');
   const maxElsInput=document.getElementById('maxEls');
   const quantInput=document.getElementById('quant');
+  const stripHeaderChk=document.getElementById('stripHeaderChk');
+  const stripSelInput=document.getElementById('stripSel');
 
   let isLoaded = false;
   let currentWidth = parseInt(getComputedStyle(viewport).width) || 375;
@@ -144,6 +152,25 @@
     fr.onload =()=>resolve(String(fr.result||""));
     fr.readAsText(file);
   });
+
+  // HTML文字列から指定セレクタに一致する要素を削除して返す
+  const stripHeaderFromHtml = (htmlText, selectorList) => {
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(htmlText, "text/html");
+      if (!doc || !doc.documentElement) return htmlText;
+      const sel = String(selectorList || "").trim();
+      if (!sel) return htmlText;
+      doc.querySelectorAll(sel).forEach(node => node.remove());
+      // 元HTMLのDOCTYPEを維持
+      const hasDoctype = /^<!doctype\s+html[^>]*>/i.test(htmlText);
+      const doctype = hasDoctype ? (htmlText.match(/^<!doctype\s+html[^>]*>/i)||[""])[0]+"\n" : "<!doctype html>\n";
+      return doctype + doc.documentElement.outerHTML;
+    } catch (e) {
+      console.warn("stripHeaderFromHtml failed:", e);
+      return htmlText; // 失敗時はそのまま
+    }
+  };
 
   const setViewportWidth = async (px,{silent=false}={})=>{
     const minW=+minWInput.value||320, maxW=+maxWInput.value||2560;
@@ -429,9 +456,14 @@ mark.style.height = Math.max(0, r.height + 8) + "px";
     if (!htmlFile.files[0]) { alert("HTMLファイルを1つ選択してください。"); return; }
     toggleControls(false); loadMsg.textContent="読み込み中…"; statusEl.textContent="";
     try {
-      const htmlText = await readAsText(htmlFile.files[0]);
+      let htmlText = await readAsText(htmlFile.files[0]);
       const cssTexts=[]; for (const f of cssFiles.files) cssTexts.push(await readAsText(f));
       const jsTexts=[];  for (const f of jsFiles.files)  jsTexts.push(await readAsText(f));
+
+      // ★ 読み込み時にヘッダーを削除（有効時）
+      if (stripHeaderChk?.checked) {
+        htmlText = stripHeaderFromHtml(htmlText, stripSelInput?.value || "");
+      }
 
 // 画像アセットのマップ作成
       const assetMap = buildAssetMap(imgFiles.files);
