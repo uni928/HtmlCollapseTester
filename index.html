@@ -119,7 +119,7 @@
   const gearPanel= document.getElementById('gearPanel');
   const minWInput= document.getElementById('minW');
   const maxWInput= document.getElementById('maxW');
-  const coarseInput=document.getElementById('coarse');
+  const coarseInput=document.getElementById('coarse'); // ← 互換のため残すが未使用
   const maxElsInput=document.getElementById('maxEls');
   const quantInput=document.getElementById('quant');
 
@@ -247,11 +247,8 @@
     return order;
   };
 
-  // --- 上方シフト考慮のための累積ΔHを計算 ---
-  // 基準リスト(base.list)と現在(order)の高さを突き合わせ、
-  // 「自分より上（基準topが小さい＆重なっていない）の要素」の ΔH の合計を、自分の期待topの補正に用いる。
+  // --- 上方シフト考慮のための累積ΔH（今回は高さだけ判定なので算出だけ） ---
   const buildDeltaHMap = (base, order) => {
-    // uid -> deltaH
     const deltaH = new Map();
     const baseMapH = base.map;
     for (const now of order) {
@@ -261,14 +258,12 @@
     }
     return deltaH;
   };
-
   const cumulativeShiftAbove = (uid, base, deltaHMap) => {
     const me = base.list.find(x=>x.uid===uid);
     if (!me) return 0;
     let shift = 0;
     for (const b of base.list) {
       if (b.uid === uid) break;
-      // 「自分より上」＝ 基準bottom <= 自分の基準top（重なっていない上側）
       if (b.bottom <= me.top) {
         const d = deltaHMap.get(b.uid) || 0;
         shift += d;
@@ -277,23 +272,19 @@
     return shift;
   };
 
-  // --- 差分（高さのみ判定。ただし上方シフトを考慮して位置ズレは無視） ---
-  // 高さが変わった要素のみを返す。位置ズレだけの要素は返さない。
+  // --- 差分（高さのみ判定。上方シフトは位置ズレとみなし無視） ---
   const diffHeights = (base, order, quant=1)=>{
     const diffs = [];
-    const deltaHMap = buildDeltaHMap(base, order);
+    const THRESHOLD_PX = 10; // ★ ここで閾値（10px以上を変化扱い）
+    buildDeltaHMap(base, order); // 必要なら将来拡張で利用
 
     for (const now of order) {
       const baseH = base.map.get(now.uid);
       if (baseH == null) continue;
-
-      const THRESHOLD_PX = 10;  // 必要なら数値を変える
-
-// ...
-const dh = now.height - baseH;
-if (Math.abs(dh) >= THRESHOLD_PX) {   // ← これだけ
-  diffs.push({ uid: now.uid, el: now.el, prev: baseH, curr: now.height, dh });
-}
+      const dh = now.height - baseH;
+      if (Math.abs(dh) >= THRESHOLD_PX) {
+        diffs.push({ uid: now.uid, el: now.el, prev: baseH, curr: now.height, dh });
+      }
     }
     return diffs;
   };
@@ -307,16 +298,16 @@ if (Math.abs(dh) >= THRESHOLD_PX) {   // ← これだけ
       try {
         d.el.classList.add('__height_changed__');
         const r = d.el.getBoundingClientRect();
-const win = iframe.contentWindow;                 // ← 追加
-const sx = (win && (win.scrollX || win.pageXOffset)) || 0;
-const sy = (win && (win.scrollY || win.pageYOffset)) || 0;
+        const win = iframe.contentWindow;
+        const sx = (win && (win.scrollX || win.pageXOffset)) || 0;
+        const sy = (win && (win.scrollY || win.pageYOffset)) || 0;
 
-const mark = doc.createElement('div');
-mark.className='__height_marker__';
-mark.style.left = Math.max(0, r.left - 4 + sx) + "px";  // ← 外側windowではなくiframe側のスクロール
-mark.style.top  = Math.max(0, r.top  - 4 + sy) + "px";  // ← 同上
-mark.style.width  = Math.max(0, r.width + 8) + "px";
-mark.style.height = Math.max(0, r.height + 8) + "px";
+        const mark = doc.createElement('div');
+        mark.className='__height_marker__';
+        mark.style.left   = Math.max(0, r.left - 4 + sx) + "px";
+        mark.style.top    = Math.max(0, r.top  - 4 + sy) + "px";
+        mark.style.width  = Math.max(0, r.width + 8) + "px";
+        mark.style.height = Math.max(0, r.height + 8) + "px";
 
         const lbl = doc.createElement('div');
         lbl.className='lbl';
@@ -329,14 +320,12 @@ mark.style.height = Math.max(0, r.height + 8) + "px";
 
   // --- HTML/CSS/JS 注入（画像アセット張り替え対応） ---
   const injectIntoIframe = async (htmlText, cssTexts, jsTexts, assetMap, {stopAnim})=>{
-    // 1) HTMLを書き込み
     iframe.srcdoc = "<!doctype html><html><head><meta charset='utf-8'></head><body>Loading…</body></html>";
     await waitFrames(1);
     const doc = iframe.contentDocument;
     doc.open(); doc.write(htmlText || "<!doctype html><p>empty</p>"); doc.close();
     await waitFrames(2);
 
-    // 2) CSS（テキストに対して url(...) を事前置換してから注入）
     const head = doc.head || doc.getElementsByTagName('head')[0] || doc.documentElement;
     for (const css of cssTexts) {
       const style = doc.createElement('style');
@@ -349,10 +338,8 @@ mark.style.height = Math.max(0, r.height + 8) + "px";
       head.appendChild(killer);
     }
 
-    // 3) 画像アセット張り替え（DOM属性・style属性・<style>内）
     wireLocalAssetsInDOM(doc, assetMap.findAssetURL);
 
-    // 4) JSを注入
     const body = doc.body || doc.documentElement;
     for (const js of jsTexts) {
       const s = doc.createElement('script'); s.type='text/javascript'; s.textContent = js; body.appendChild(s);
@@ -361,9 +348,8 @@ mark.style.height = Math.max(0, r.height + 8) + "px";
     await waitFrames(3);
   };
 
-  // HTML挿入後にDOM属性の参照を張り替え（img/src, srcset, poster, link[icon], source, video/audioなど）
+  // HTML挿入後にDOM属性の参照を張り替え
   const wireLocalAssetsInDOM = (doc, findAssetURL) => {
-    // 単一URL属性
     const singleAttrs = [
       ["img","src"], ["video","poster"], ["video","src"], ["audio","src"],
       ["source","src"], ["link[rel~='icon']","href"], ["link[rel~='apple-touch-icon']","href"]
@@ -375,14 +361,12 @@ mark.style.height = Math.max(0, r.height + 8) + "px";
         if (blob) el.setAttribute(attr, blob);
       });
     }
-    // srcset（複数URL）
     const srcsetSel = ["img[srcset]", "source[srcset]"];
     doc.querySelectorAll(srcsetSel.join(",")).forEach(el => {
       const srcset = el.getAttribute("srcset");
       if (!srcset) return;
       const parts = srcset.split(",").map(s=>s.trim()).filter(Boolean);
       const rewritten = parts.map(part=>{
-        // "path xDescriptor" or just "path"
         const sp = part.split(/\s+/);
         const url = sp[0];
         const rest = sp.slice(1).join(" ");
@@ -392,14 +376,12 @@ mark.style.height = Math.max(0, r.height + 8) + "px";
       el.setAttribute("srcset", rewritten);
     });
 
-    // style属性の url(...)
     doc.querySelectorAll("[style]").forEach(el => {
       const st = el.getAttribute("style");
       const rw = rewriteCssTextWithAssets(st, findAssetURL);
       if (rw !== st) el.setAttribute("style", rw);
     });
 
-    // <style> 内の url(...)
     doc.querySelectorAll("style").forEach(styleEl => {
       const t = styleEl.textContent;
       const rw = rewriteCssTextWithAssets(t, findAssetURL);
@@ -430,7 +412,7 @@ mark.style.height = Math.max(0, r.height + 8) + "px";
       const cssTexts=[]; for (const f of cssFiles.files) cssTexts.push(await readAsText(f));
       const jsTexts=[];  for (const f of jsFiles.files)  jsTexts.push(await readAsText(f));
 
-// 画像アセットのマップ作成
+      // 画像アセットのマップ作成
       const assetMap = buildAssetMap(imgFiles.files);
       await injectIntoIframe(htmlText, cssTexts, jsTexts, assetMap, { stopAnim: pauseAnim.checked });
       isLoaded = true;
@@ -448,9 +430,8 @@ mark.style.height = Math.max(0, r.height + 8) + "px";
     }
   });
 
-  // --- 次の境界幅を探索（右） ---
+  // --- 次の境界幅を探索（右） — 1pxリニア走査版 ---
   const findNextBoundary = async ()=>{
-    const coarse = Math.max(1, +coarseInput.value||32);
     const maxEls = Math.max(50, +maxElsInput.value||400);
     const quant  = Math.max(0, +quantInput.value||1);
     const maxW   = +maxWInput.value||2560;
@@ -458,36 +439,24 @@ mark.style.height = Math.max(0, r.height + 8) + "px";
     await setViewportWidth(currentWidth, {silent:true});
     const base = baseMeta; // 現在幅を基準にする
 
-    // 粗探索：高さ変化が初めて現れる幅
-    let hit = null;
-    for (let w = currentWidth + 1; w <= maxW; w += coarse) {
-      await setViewportWidth(Math.min(w, maxW), {silent:true});
+    // 1pxずつ増やしてチェック
+    for (let w = currentWidth + 1; w <= maxW; w += 1) {
+      // 進捗表示（負荷軽減のためたまに更新）
+      if (w % 16 === 0) statusEl.textContent = `スキャン中… ${w}px`;
+      await setViewportWidth(w, {silent:true});
       const nowOrder = captureNowOrder(maxEls, quant);
       const diffs = diffHeights(base, nowOrder, quant);
-      if (diffs.length > 0) { hit = Math.min(w, maxW); break; }
+      if (diffs.length > 0) {
+        statusEl.textContent = "";
+        return w; // 最初に変化が起きた幅 = 境界
+      }
     }
-    if (hit == null) return null;
-
-    // 二分探索で最小の変化幅を詰める
-    let lo = Math.max(currentWidth + 1, hit - coarse);
-    let hi = hit;
-    // lo が既に変化している場合は補正
-    await setViewportWidth(lo, {silent:true});
-    if (diffHeights(base, captureNowOrder(maxEls, quant), quant).length > 0) {
-      lo = currentWidth + 1;
-    }
-    while (lo < hi) {
-      const mid = Math.floor((lo + hi) / 2);
-      await setViewportWidth(mid, {silent:true});
-      const diffs = diffHeights(base, captureNowOrder(maxEls, quant), quant);
-      if (diffs.length === 0) lo = mid + 1; else hi = mid;
-    }
-    return lo; // ここが境界幅
+    statusEl.textContent = "";
+    return null;
   };
 
-  // --- 前の境界幅を探索（左） ---
+  // --- 前の境界幅を探索（左） — 1pxリニア走査版 ---
   const findPrevBoundary = async ()=>{
-    const coarse = Math.max(1, +coarseInput.value||32);
     const maxEls = Math.max(50, +maxElsInput.value||400);
     const quant  = Math.max(0, +quantInput.value||1);
     const minW   = +minWInput.value||320;
@@ -495,24 +464,19 @@ mark.style.height = Math.max(0, r.height + 8) + "px";
     await setViewportWidth(currentWidth, {silent:true});
     const base = baseMeta;
 
-    let firstDiff = null;
-    for (let w = currentWidth - 1; w >= minW; w -= coarse) {
+    // 1pxずつ減らしてチェック
+    for (let w = currentWidth - 1; w >= minW; w -= 1) {
+      if (w % 16 === 0) statusEl.textContent = `スキャン中… ${w}px`;
       await setViewportWidth(w, {silent:true});
-      const diffs = diffHeights(base, captureNowOrder(maxEls, quant), quant);
-      if (diffs.length > 0) { firstDiff = w; break; }
+      const nowOrder = captureNowOrder(maxEls, quant);
+      const diffs = diffHeights(base, nowOrder, quant);
+      if (diffs.length > 0) {
+        statusEl.textContent = "";
+        return w + 1; // w では変化、w+1 では変化なし → 境界は w+1
+      }
     }
-    if (firstDiff == null) return null;
-
-    // base≠の最大w を探す → +1 が境界
-    let lo = Math.max(minW, firstDiff);
-    let hi = currentWidth - 1;
-    while (lo < hi) {
-      const mid = Math.floor((lo + hi + 1) / 2);
-      await setViewportWidth(mid, {silent:true});
-      const diffs = diffHeights(base, captureNowOrder(maxEls, quant), quant);
-      if (diffs.length > 0) lo = mid; else hi = mid - 1;
-    }
-    return lo + 1; // 境界幅
+    statusEl.textContent = "";
+    return null;
   };
 
   // --- 右：境界へダイレクト。変化後のみ強調 ---
@@ -532,39 +496,10 @@ mark.style.height = Math.max(0, r.height + 8) + "px";
         const diffs = diffHeights(baseMeta, nowOrder, +quantInput.value||1);
         highlightDiffs(diffs);
         statusEl.textContent = diffs.length ? `変化 ${diffs.length} 要素 @ ${boundary}px` : `変化なし @ ${boundary}px`;
-        // 次回の基準を更新（現在幅を基準にする運用の方が自然）
+        // 次回の基準を更新（現在幅を基準にする運用）
         baseMeta = captureBaseMeta(+maxElsInput.value||400, +quantInput.value||1);
       }
     } finally { toggleControls(true); }
-  };
-
-// --- 画像アセットのBlob URL化＆マッピング ---
-  const buildAssetMap = (fileList) => {
-    const byName = new Map();     // "logo.png" -> blobURL
-    const byLower = new Map();    // lower-case name
-    for (const f of fileList) {
-      const url = URL.createObjectURL(f);
-      byName.set(f.name, url);
-      byLower.set(f.name.toLowerCase(), url);
-    }
-    // 簡易・末尾一致検索ヘルパ
-    const findAssetURL = (refUrl) => {
-      if (!refUrl) return null;
-      try {
-        const u = new URL(refUrl, "http://local/");
-        const path = decodeURIComponent(u.pathname || "");
-        const file = path.split("/").filter(Boolean).pop() || "";
-        if (!file) return null;
-        return byName.get(file) || byLower.get(file.toLowerCase()) || null;
-      } catch {
-        // 相対参照等もあるので、最後のパスセグメントだけで推測
-        const clean = String(refUrl).split("?")[0].split("#")[0];
-        const file = clean.split("/").filter(Boolean).pop() || "";
-        if (!file) return null;
-        return byName.get(file) || byLower.get(file.toLowerCase()) || null;
-      }
-    };
-    return { byName, byLower, findAssetURL };
   };
 
   // --- 左：前の境界へダイレクト。変化後のみ強調 ---
@@ -587,6 +522,33 @@ mark.style.height = Math.max(0, r.height + 8) + "px";
         baseMeta = captureBaseMeta(+maxElsInput.value||400, +quantInput.value||1);
       }
     } finally { toggleControls(true); }
+  };
+
+  // --- 画像アセットのBlob URL化＆マッピング ---
+  const buildAssetMap = (fileList) => {
+    const byName = new Map();
+    const byLower = new Map();
+    for (const f of fileList) {
+      const url = URL.createObjectURL(f);
+      byName.set(f.name, url);
+      byLower.set(f.name.toLowerCase(), url);
+    }
+    const findAssetURL = (refUrl) => {
+      if (!refUrl) return null;
+      try {
+        const u = new URL(refUrl, "http://local/");
+        const path = decodeURIComponent(u.pathname || "");
+        const file = path.split("/").filter(Boolean).pop() || "";
+        if (!file) return null;
+        return byName.get(file) || byLower.get(file.toLowerCase()) || null;
+      } catch {
+        const clean = String(refUrl).split("?")[0].split("#")[0];
+        const file = clean.split("/").filter(Boolean).pop() || "";
+        if (!file) return null;
+        return byName.get(file) || byLower.get(file.toLowerCase()) || null;
+      }
+    };
+    return { byName, byLower, findAssetURL };
   };
 
   nextBtn.addEventListener('click', goNext);
